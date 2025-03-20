@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+
+<robot name="Mecanum_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <joint name="imu_joint" type="fixed">
+      <origin xyz="0 0 0.01" rpy="0 0 0"/> <!-- Positioned 0.05m above the lidar -->
+      <parent link="lidar_frame"/>
+      <child link="imu_link"/>
+  </joint>
+
+  <link name="imu_link">
+      <inertial>
+        <mass value="0.01"/> <!-- Adjust this based on the actual weight of the IMU -->
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="0.0001" ixy="0.0" ixz="0.0" iyy="0.0001" iyz="0.0" izz="0.0001"/>
+      </inertial>
+      <visual>
+        <geometry>
+          <box size="0.03 0.03 0.01"/> <!-- Size of the IMU -->
+        </geometry>
+        <material name="grey">
+          <color rgba="0.5 0.5 0.5 1"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <box size="0.03 0.03 0.01"/> <!-- Same size for collision geometry -->
+        </geometry>
+      </collision>
+  </link>
+    
+
+  <gazebo>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu" />
+  </gazebo>
+
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>1</always_on>
+      <update_rate>1</update_rate>
+      <visualize>true</visualize>
+      <topic>imu</topic>
+      <gz_frame_id>imu_link</gz_frame_id>
+    </sensor>
+  </gazebo>
+
+</robot>
