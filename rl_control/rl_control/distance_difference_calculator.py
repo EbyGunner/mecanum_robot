@@ -71,13 +71,3 @@ class GoalDistanceCalculator(Node):
     def quaternion_to_yaw(self, q):
         """Convert quaternion to yaw angle in radians."""
         return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))
-    
-def main(args=None):
-    rclpy.init(args=args)
-    node = GoalDistanceCalculator()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()

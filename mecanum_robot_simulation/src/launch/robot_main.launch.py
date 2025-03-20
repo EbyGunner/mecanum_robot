@@ -23,15 +23,6 @@ def generate_launch_description():
     package_path = get_package_share_directory('mecanum_robot_simulation')
     bridge_params = os.path.join(package_path, 'src', 'config', 'gazeebo_ros_bridge.yaml')
 
-    # Set gazebo sim resource path
-    # gazebo_resource_path = SetEnvironmentVariable(
-    #     name='GZ_SIM_RESOURCE_PATH',
-    #     value=[
-    #         os.path.join(package_path, 'src', 'worlds'), ':' +
-    #         str(Path(package_path).parent.resolve())
-    #     ]
-    # )
-
     # Declare world argument
     arguments = DeclareLaunchArgument(
         'world',
@@ -118,8 +109,8 @@ def generate_launch_description():
     )
 
     RL_node = Node(
-        package='rl_control',  # Replace with your package name
-        executable='wheel_RL_controller',  # Replace with your executable name
+        package='rl_control',  
+        executable='rl_controller',  
         name='RL algorithm launcher',
         output='screen'
     )
@@ -138,18 +129,10 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'online_async_launch.py'))
     )
 
-    goal_distance_calculator_node = Node(
-        package='rl_control',  # Replace with your package name
-        executable='distance_diff',  # Replace with your executable name
-        name='goal_distance_calculator',
-        output='screen'
-    )
-
     return LaunchDescription([
         RL_or_nav_selection,
         slam_arg,
         arguments,
-        # gazebo_resource_path,
         gazebo,
         node_robot_state_publisher,
         gz_spawn_entity,
@@ -162,5 +145,4 @@ def generate_launch_description():
                 on_exit=[slam_node, selection_node],
             )
         ),
-        goal_distance_calculator_node,
     ])

@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'distance_diff = rl_control.distance_difference_calculator:main',
+            'rl_controller = rl_control.wheel_RL_controller:main',
         ],
     },
 )
