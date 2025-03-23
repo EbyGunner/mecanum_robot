@@ -1,10 +1,9 @@
 import os
 import xacro
-from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -111,12 +110,9 @@ def generate_launch_description():
     RL_node = Node(
         package='rl_control',  
         executable='rl_controller',  
-        name='RL algorithm launcher',
+        name='rl_controller_node',
         output='screen'
     )
-
-    # Conditional selection using opaque function
-    from launch.actions import OpaqueFunction
 
     def select_navigation_or_RL(context):
         use_RL = context.launch_configurations.get('use_RL', 'false').lower() == 'true'
