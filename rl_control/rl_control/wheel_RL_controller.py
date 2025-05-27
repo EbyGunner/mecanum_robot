@@ -1,21 +1,49 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64MultiArray
+from sensor_msgs.msg import LaserScan
 
 from . import wheel_velocity_translator
 from . import distance_difference_calculator
 
-class RL_controller(Node):
+import gymnasium as gym
+import numpy as np
+
+class RL_controller(Node, gym.Env):
     def __init__(self):
 
         super().__init__('rl_controller_node')
 
         self.cmd_vel_pub = self.create_publisher(Float64MultiArray, '/wheel_velocity_controller/commands', 10)
 
-    def wheel_callback(self):
-        """Callback function to process wheel velocities and compute vehicle velocity"""
-        self.callback = True
+        self.observation_space = gym.spaces.Box(low=0, high=30, shape=(362,), dtype=np.float32)
+
+        self.action_space = gym.spaces.Box(low=-10.0, high=10.0, shape=(4,), dtype=np.float32)
+
+        # Subscriber to goal-position difference topic
+        self.wheel_sub = self.create_subscription(
+            Float64MultiArray,
+            '/goal_position_difference',
+            self.goal_difference,
+            10
+        )
+
+        # Subscriber to lidar topic
+        self.wheel_sub = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.lidar_callback,
+            10
+        )
+
+
+    def goal_difference(self, msg):
+        """Callback function to process positional difference between the current position and the goal"""
+        self.position_diff, self.orientation_diff = msg
+
+    def lidar_callback(self, msg):
+        """Callback function to process lidar data"""
+         
 
 def main(args=None):
     rclpy.init(args=args)

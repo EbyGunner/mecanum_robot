@@ -3,6 +3,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from tf2_ros import Buffer, TransformListener
 import math
+from std_msgs.msg import Float64MultiArray
 
 class GoalDistanceCalculator(Node):
     def __init__(self):
@@ -22,6 +23,9 @@ class GoalDistanceCalculator(Node):
 
         self.goal_pose = None  # Store the latest goal
         self.timer = self.create_timer(0.5, self.calculate_distance)  # Update every 0.5s
+
+        # Publisher for vehicle goal-position difference publisher
+        self.goal_position_difference = self.create_publisher(Float64MultiArray, '/goal_position_difference', 10)
 
     def goal_callback(self, msg):
         """Update goal pose when a new one is received from RViz."""
@@ -67,6 +71,11 @@ class GoalDistanceCalculator(Node):
         yaw_diff = math.atan2(math.sin(g_yaw - r_yaw), math.cos(g_yaw - r_yaw))
 
         self.get_logger().info(f"Distance to Goal: {distance:.2f} meters, Orientation Diff: {math.degrees(yaw_diff):.2f}°")
+
+        goal_pos_diff = Float64MultiArray()
+        goal_pos_diff.data = [distance, yaw_diff]
+
+        self.goal_position_difference.publish(goal_pos_diff)
 
     def quaternion_to_yaw(self, q):
         """Convert quaternion to yaw angle in radians."""

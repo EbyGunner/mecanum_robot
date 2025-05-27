@@ -15,7 +15,7 @@ def generate_launch_description():
     # Declare RL usage argument
     RL_or_nav_selection = DeclareLaunchArgument(
         'use_RL',
-        default_value='false',  # Boolean values should be given as strings
+        default_value='false',
         description='Use RL control algorithm if true'
     )
 
@@ -37,7 +37,7 @@ def generate_launch_description():
             ('gz_args', [LaunchConfiguration('world'),
                          '.sdf',
                          ' -v 4',  # Verbose mode for logging
-                         ' -r']  # Starts the simulation in real-time mode
+                         ' -r']    # Starts the simulation in real-time mode
              )
         ]
     )
@@ -118,7 +118,7 @@ def generate_launch_description():
         use_RL = context.launch_configurations.get('use_RL', 'false').lower() == 'true'
         return [RL_node] if use_RL else [navigation_node]
 
-    selection_node = OpaqueFunction(function=select_navigation_or_RL)
+    selected_node = OpaqueFunction(function=select_navigation_or_RL)
 
     # SLAM node
     slam_node = IncludeLaunchDescription(
@@ -138,7 +138,7 @@ def generate_launch_description():
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=gz_spawn_entity,
-                on_exit=[slam_node, selection_node],
+                on_exit=[slam_node, selected_node],
             )
         ),
     ])
