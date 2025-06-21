@@ -12,6 +12,8 @@
             <wheel_radius>0.029</wheel_radius>
             <wheelbase>0.235</wheelbase>
 
+            <topic>/cmd_vel</topic>
+
         </plugin>
 
         <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">

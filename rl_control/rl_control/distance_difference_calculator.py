@@ -22,10 +22,14 @@ class GoalDistanceCalculator(Node):
         )
 
         self.goal_pose = None  # Store the latest goal
-        self.timer = self.create_timer(0.5, self.calculate_distance)  # Update every 0.5s
+        self.timer = self.create_timer(0.1, self.calculate_distance)  # Increased to 10Hz to match RL control
 
         # Publisher for vehicle goal-position difference publisher
-        self.goal_position_difference = self.create_publisher(Float64MultiArray, '/goal_position_difference', 10)
+        self.goal_position_difference = self.create_publisher(
+            Float64MultiArray, 
+            '/goal_position_difference', 
+            10
+        )
 
     def goal_callback(self, msg):
         """Update goal pose when a new one is received from RViz."""
@@ -41,8 +45,8 @@ class GoalDistanceCalculator(Node):
                 rclpy.time.Time()
             )
             return transform.transform
-        except:
-            self.get_logger().warn("Waiting for transform from map → base_link")
+        except Exception as e:
+            self.get_logger().warn(f"Waiting for transform from map → base_link: {str(e)}")
             return None
 
     def calculate_distance(self):
@@ -54,29 +58,34 @@ class GoalDistanceCalculator(Node):
         if robot_pose is None:
             return
 
-        # Extract robot's position
+        # Extract positions
         rx, ry = robot_pose.translation.x, robot_pose.translation.y
-
-        # Extract goal's position
         gx, gy = self.goal_pose.pose.position.x, self.goal_pose.pose.position.y
 
         # Calculate Euclidean distance
-        distance = math.sqrt((gx - rx) ** 2 + (gy - ry) ** 2)
+        distance = math.sqrt((gx - rx)**2 + (gy - ry)**2)
 
-        # Extract robot's and goal's yaw (from quaternion to yaw)
-        r_yaw = self.quaternion_to_yaw(robot_pose.rotation)
-        g_yaw = self.quaternion_to_yaw(self.goal_pose.pose.orientation)
+        # Calculate angle to goal (global frame)
+        angle_to_goal = math.atan2(gy - ry, gx - rx)
+
+        # Get robot's current yaw
+        robot_yaw = self.quaternion_to_yaw(robot_pose.rotation)
 
         # Compute orientation difference (ensure it's between -π to π)
-        yaw_diff = math.atan2(math.sin(g_yaw - r_yaw), math.cos(g_yaw - r_yaw))
+        yaw_diff = math.atan2(math.sin(angle_to_goal - robot_yaw), 
+                             math.cos(angle_to_goal - robot_yaw))
 
-        self.get_logger().info(f"Distance to Goal: {distance:.2f} meters, Orientation Diff: {math.degrees(yaw_diff):.2f}°")
-
+        # Publish as [x_diff, y_diff, angle_diff] for more flexible use
         goal_pos_diff = Float64MultiArray()
-        goal_pos_diff.data = [distance, yaw_diff]
+        goal_pos_diff.data = [
+            gx - rx,  # x difference
+            gy - ry,  # y difference
+            yaw_diff  # angle difference
+        ]
 
         self.goal_position_difference.publish(goal_pos_diff)
 
     def quaternion_to_yaw(self, q):
         """Convert quaternion to yaw angle in radians."""
-        return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))
+        return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 
+                         1.0 - 2.0 * (q.y**2 + q.z**2))

@@ -29,6 +29,13 @@ def generate_launch_description():
         description='Gz sim World'
     )
 
+    # SLAM argument
+    slam_arg = DeclareLaunchArgument(
+        'slam',
+        default_value='True',
+        description='Whether to run SLAM'
+    )
+
     # Gazebo launch
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(
@@ -94,31 +101,24 @@ def generate_launch_description():
         arguments=["-d", rviz_config_file],
     )
 
-    # SLAM argument
-    slam_arg = DeclareLaunchArgument(
-        'slam',
-        default_value='True',
-        description='Whether to run SLAM'
-    )
+    # # Select navigation or RL based on the argument
+    # navigation_node = IncludeLaunchDescription(
+    #     PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'navigation_launch.py')),
+    #     launch_arguments={'slam': LaunchConfiguration('slam')}.items()
+    # )
 
-    # Select navigation or RL based on the argument
-    navigation_node = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'navigation_launch.py')),
-        launch_arguments={'slam': LaunchConfiguration('slam')}.items()
-    )
+    # RL_node = Node(
+    #     package='rl_control',  
+    #     executable='rl_controller',  
+    #     name='rl_controller_node',
+    #     output='screen'
+    # )
 
-    RL_node = Node(
-        package='rl_control',  
-        executable='rl_controller',  
-        name='rl_controller_node',
-        output='screen'
-    )
+    # def select_navigation_or_RL(context):
+    #     use_RL = context.launch_configurations.get('use_RL', 'false').lower() == 'true'
+    #     return [RL_node] if use_RL else [navigation_node]
 
-    def select_navigation_or_RL(context):
-        use_RL = context.launch_configurations.get('use_RL', 'false').lower() == 'true'
-        return [RL_node] if use_RL else [navigation_node]
-
-    selected_node = OpaqueFunction(function=select_navigation_or_RL)
+    # selected_node = OpaqueFunction(function=select_navigation_or_RL)
 
     # SLAM node
     slam_node = IncludeLaunchDescription(
@@ -135,10 +135,13 @@ def generate_launch_description():
         bridge,
         gazebo_ros_image_bridge,
         rviz_node,
+        # navigation_node,
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=gz_spawn_entity,
-                on_exit=[slam_node, selected_node],
+                on_exit=[slam_node, 
+                        #  selected_node
+                         ],
             )
         ),
     ])
