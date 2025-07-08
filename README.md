@@ -8,29 +8,62 @@ The simulation supports two navigation approaches:
 1. **Nav2 (Navigation Stack 2)** – Currently not optimized.
 2. **Reinforcement Learning (RL)** – Implementation is in progress.
 
-## Setup Instructions
+## 📦 Repository
 
-### Clone and Build the Repository
+**GitHub Link**: [https://github.com/EbyGunner/mecanum_robot.git](https://github.com/EbyGunner/mecanum_robot.git)
+
+---
+
+## 🛠️ Requirements
+
+- ROS 2 Jazzy
+- Nav2
+- Python3 packages: `gymnasium` and `stable_baselines3`
+
+---
+
+## ✅ Installation Steps
+
+### 1. Setup a ROS 2 Humble Workspace
+
 ```bash
-cd ~/ros2_ws/src  # Navigate to your ROS 2 workspace
-git clone https://github.com/EbyGunner/mecanum_robot.git  # Clone the repository
-cd ..
-colcon build  # Build the workspace
-source install/setup.bash  # Source the workspace
+mkdir -p ~/mecanum_robot/src
+cd ~/mecanum_robot/src
 ```
+---
 
-### Running the Simulation
+### 2. Clone the Repository
 
-**Run the RL Control Algorithm**
+⚠️ DO NOT create a sub-folder; clone the repository directly inside `src`.
 
-``` bash
-ros2 launch mecanum_robot_simulation robot_main.launch.py use_RL:=true
+```bash
+git clone https://github.com/EbyGunner/mecanum_robot.git
 ```
+---
+### 3. Install Required Python Packages
+Local installation of mediapipe in project directory:
 
-**Run the Nav2 Control Algorithm**
-
-``` bash
-ros2 launch mecanum_robot_simulation robot_main.launch.py use_RL:=false
+To avoid installing mediapipe globally:
+```bash
+cd ~/mecanum_robot/src/rl_control/rl_control
+mkdir -p external_libraries
+pip3 install stable_baselines3 --target=external_libraries
+pip3 install gymnasium --target=external_libraries
 ```
+This will install the required python libraries in the `rl_control/external_libraries` folder. The reinforcement learning script is already configured to import it from this local path.
 
-Note: By default, the simulation runs using Nav2 unless specified otherwise.
+---
+### 5. Build the Workspace
+```bash
+cd ~/mecanum_robot
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install
+```
+---
+### 6. Source the Workspace
+```bash
+source ~/mecanum_robot/install/setup.bash
+```
+---
+
+Note: By default, the simulation runs using RL mode unless specified otherwise.
