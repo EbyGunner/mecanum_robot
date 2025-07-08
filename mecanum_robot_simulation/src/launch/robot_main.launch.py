@@ -1,7 +1,6 @@
 import os
 import xacro
 from ament_index_python.packages import get_package_share_directory
-
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -15,12 +14,14 @@ def generate_launch_description():
     # Declare RL usage argument
     RL_or_nav_selection = DeclareLaunchArgument(
         'use_RL',
-        default_value='false',
+        default_value='true',
         description='Use RL control algorithm if true'
     )
 
     package_path = get_package_share_directory('mecanum_robot_simulation')
     bridge_params = os.path.join(package_path, 'src', 'config', 'gazeebo_ros_bridge.yaml')
+
+    rl_package = get_package_share_directory('rl_control')
 
     # Declare world argument
     arguments = DeclareLaunchArgument(
@@ -102,23 +103,20 @@ def generate_launch_description():
     )
 
     # # Select navigation or RL based on the argument
-    # navigation_node = IncludeLaunchDescription(
-    #     PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'navigation_launch.py')),
-    #     launch_arguments={'slam': LaunchConfiguration('slam')}.items()
-    # )
+    navigation_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'navigation_launch.py')),
+        launch_arguments={'slam': LaunchConfiguration('slam')}.items()
+    )
 
-    # RL_node = Node(
-    #     package='rl_control',  
-    #     executable='rl_controller',  
-    #     name='rl_controller_node',
-    #     output='screen'
-    # )
+    RL_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(rl_package, 'launch', 'mecanum_rl_control.launch.py')),
+        )
 
-    # def select_navigation_or_RL(context):
-    #     use_RL = context.launch_configurations.get('use_RL', 'false').lower() == 'true'
-    #     return [RL_node] if use_RL else [navigation_node]
+    def select_navigation_or_RL(context):
+        use_RL = context.launch_configurations.get('use_RL', 'false').lower() == 'true'
+        return [RL_node] if use_RL else [navigation_node]
 
-    # selected_node = OpaqueFunction(function=select_navigation_or_RL)
+    selected_node = OpaqueFunction(function=select_navigation_or_RL)
 
     # SLAM node
     slam_node = IncludeLaunchDescription(
@@ -135,12 +133,11 @@ def generate_launch_description():
         bridge,
         gazebo_ros_image_bridge,
         rviz_node,
-        # navigation_node,
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=gz_spawn_entity,
                 on_exit=[slam_node, 
-                        #  selected_node
+                         selected_node
                          ],
             )
         ),

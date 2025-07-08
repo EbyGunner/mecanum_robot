@@ -30,9 +30,9 @@ class MecanumWheelController(Node):
         self.robot_length = 0.235  # meters (distance between front/rear wheels)
         
         # Velocity limits
-        self.max_wheel_velocity = 10.0  # rad/s
-        self.max_linear_velocity = 1.0  # m/s
-        self.max_angular_velocity = 2.0  # rad/s
+        self.max_wheel_velocity = 30.0  # Increased from 10.0
+        self.max_linear_velocity = 2.0  # Increased from 1.0
+        self.max_angular_velocity = 4.0  # Increased from 2.0
         
         # Compute forward kinematics matrix (converts wheel velocities to body twist)
         L = self.robot_length
@@ -40,14 +40,12 @@ class MecanumWheelController(Node):
         R = self.wheel_radius
         self.forward_kinematics = np.array([
             [1, 1, 1, 1],
-            [-1, 1, 1, -1],
+            [1, -1, -1, 1],
             [-1/(L+W), 1/(L+W), -1/(L+W), 1/(L+W)]
         ]) * (R/4)
         
         self.get_logger().info(f"Forward kinematics matrix:\n{self.forward_kinematics}")
-        
-        # Test publisher
-        self.timer = self.create_timer(1.0, self.test_publish)
+
 
     def wheel_callback(self, msg):
         """Convert wheel velocities to body twist"""
@@ -80,10 +78,3 @@ class MecanumWheelController(Node):
             
         except Exception as e:
             self.get_logger().error(f"Error in wheel callback: {str(e)}")
-
-    def test_publish(self):
-        """Test method to verify publisher is working"""
-        twist = Twist()
-        twist.linear.x = 0.1
-        self.cmd_vel_pub.publish(twist)
-        self.get_logger().info("Published TEST cmd_vel message")

@@ -12,7 +12,7 @@
             <wheel_radius>0.029</wheel_radius>
             <wheelbase>0.235</wheelbase>
 
-            <topic>/cmd_vel</topic>
+            <topic>model/mecanum_robot/cmd_vel</topic>
 
         </plugin>
 
