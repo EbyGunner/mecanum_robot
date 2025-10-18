@@ -68,13 +68,27 @@ class MecanumWheelController(Node):
             
             self.cmd_vel_pub.publish(twist)
             
-            self.get_logger().info(
-                f"Converted wheel velocities {msg.data} to "
-                f"twist: lin.x={twist.linear.x:.2f}, "
-                f"lin.y={twist.linear.y:.2f}, "
-                f"ang.z={twist.angular.z:.2f}",
-                throttle_duration_sec=0.5
-            )
+            # self.get_logger().info(
+            #     f"Converted wheel velocities {msg.data} to "
+            #     f"twist: lin.x={twist.linear.x:.2f}, "
+            #     f"lin.y={twist.linear.y:.2f}, "
+            #     f"ang.z={twist.angular.z:.2f}",
+            #     throttle_duration_sec=0.5
+            # )
             
         except Exception as e:
             self.get_logger().error(f"Error in wheel callback: {str(e)}")
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = MecanumWheelController()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()

@@ -102,7 +102,21 @@ def generate_launch_description():
         arguments=["-d", rviz_config_file],
     )
 
-    # # Select navigation or RL based on the argument
+    # SLAM node
+    slam_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'online_async_launch.py'))
+    )
+
+    # Define RL support nodes
+    wheel_velocity_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(rl_package, 'launch', 'mecanum_wheel_velocity.launch.py')),
+    )
+
+    distance_difference_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(rl_package, 'launch', 'mecanum_distance_difference.launch.py')),
+    )
+
+    # Select navigation or RL based on the argument
     navigation_node = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'navigation_launch.py')),
         launch_arguments={'slam': LaunchConfiguration('slam')}.items()
@@ -110,18 +124,20 @@ def generate_launch_description():
 
     RL_node = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(rl_package, 'launch', 'mecanum_rl_control.launch.py')),
-        )
-
-    def select_navigation_or_RL(context):
-        use_RL = context.launch_configurations.get('use_RL', 'false').lower() == 'true'
-        return [RL_node] if use_RL else [navigation_node]
-
-    selected_node = OpaqueFunction(function=select_navigation_or_RL)
-
-    # SLAM node
-    slam_node = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'online_async_launch.py'))
     )
+
+    def select_nodes(context):
+        """Select which nodes to launch based on use_RL parameter"""
+        use_RL = context.launch_configurations.get('use_RL', 'false').lower() == 'true'
+        
+        if use_RL:
+            # Launch RL node with its support nodes
+            return [RL_node, wheel_velocity_node, distance_difference_node]
+        else:
+            # Launch only navigation node
+            return [navigation_node]
+
+    selected_nodes = OpaqueFunction(function=select_nodes)
 
     return LaunchDescription([
         RL_or_nav_selection,
@@ -136,9 +152,13 @@ def generate_launch_description():
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=gz_spawn_entity,
-                on_exit=[slam_node, 
-                         selected_node
-                         ],
+                on_exit=[slam_node],
+            )
+        ),
+        RegisterEventHandler(
+            event_handler=OnProcessExit(
+                target_action=gz_spawn_entity,
+                on_exit=[selected_nodes],
             )
         ),
     ])

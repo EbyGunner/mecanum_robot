@@ -1,91 +1,127 @@
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from tf2_ros import Buffer, TransformListener
+from message_interfaces.msg import GoalCurrentPose
 import math
-from std_msgs.msg import Float64MultiArray
 
-class GoalDistanceCalculator(Node):
+class GoalCurrentPosePublisher(Node):
     def __init__(self):
-        super().__init__('goal_distance_calculator')
+        super().__init__('goal_current_pose_publisher')
 
-        # TF Buffer and Listener to get the robot's current pose
+        # TF Buffer and Listener to get the robot's current pose (map -> base_link)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # Subscribe to goal pose from RViz
+        # Subscribe to goal pose (e.g. from RViz)
         self.goal_sub = self.create_subscription(
-            PoseStamped, 
-            '/goal_pose', 
-            self.goal_callback, 
+            PoseStamped,
+            '/goal_pose',
+            self.goal_callback,
             10
         )
 
-        self.goal_pose = None  # Store the latest goal
-        self.timer = self.create_timer(0.1, self.calculate_distance)  # Increased to 10Hz to match RL control
+        self.goal_pose: PoseStamped | None = None
+        self.latest_transform: TransformStamped | None = None
 
-        # Publisher for vehicle goal-position difference publisher
-        self.goal_position_difference = self.create_publisher(
-            Float64MultiArray, 
-            '/goal_position_difference', 
+        # Publisher for the combined message
+        self.pub = self.create_publisher(
+            GoalCurrentPose,
+            'goal_current_pose',
             10
         )
 
-    def goal_callback(self, msg):
-        """Update goal pose when a new one is received from RViz."""
+        # Timer at 10 Hz
+        self.timer = self.create_timer(0.1, self.timer_cb)
+
+        # Distance tracking
+        self.last_distance_log_time = self.get_clock().now()
+        self.distance_log_interval = 2.0  # Log every 2 seconds to avoid spam
+
+    def goal_callback(self, msg: PoseStamped):
+        """Store latest goal pose as received (keeps original PoseStamped)."""
         self.goal_pose = msg
-        self.get_logger().info("New goal received!")
+        self.get_logger().info('Received new goal pose.')
 
-    def get_robot_pose(self):
-        """Get the robot's current pose from SLAM (base_link in map frame)."""
+    def lookup_robot_transform(self) -> TransformStamped | None:
+        """Try to lookup transform map -> base_link. Returns TransformStamped or None."""
         try:
+            # use latest available transform
             transform: TransformStamped = self.tf_buffer.lookup_transform(
-                'map',  # SLAM frame
-                'base_link',  # Robot's base frame
-                rclpy.time.Time()
+                'map',        # target frame
+                'base_link',  # source frame
+                rclpy.time.Time()  # latest
             )
-            return transform.transform
+            return transform
         except Exception as e:
-            self.get_logger().warn(f"Waiting for transform from map → base_link: {str(e)}")
+            # quiet warning, don't spam too often
+            self.get_logger().debug(f"Transform lookup failed: {e}")
             return None
 
-    def calculate_distance(self):
-        """Compute the distance and orientation difference between robot and goal."""
-        if self.goal_pose is None:
-            return
+    def calculate_distance(self, goal_pose: PoseStamped, current_transform: TransformStamped) -> float:
+        """Calculate Euclidean distance between goal and current position."""
+        goal_x = goal_pose.pose.position.x
+        goal_y = goal_pose.pose.position.y
         
-        robot_pose = self.get_robot_pose()
-        if robot_pose is None:
+        current_x = current_transform.transform.translation.x
+        current_y = current_transform.transform.translation.y
+        
+        dx = goal_x - current_x
+        dy = goal_y - current_y
+        
+        return math.sqrt(dx*dx + dy*dy)
+
+    def timer_cb(self):
+        """Publish combined message when both the goal and current transform are available."""
+        if self.goal_pose is None:
+            # no goal yet
             return
 
-        # Extract positions
-        rx, ry = robot_pose.translation.x, robot_pose.translation.y
-        gx, gy = self.goal_pose.pose.position.x, self.goal_pose.pose.position.y
+        transform = self.lookup_robot_transform()
+        if transform is None:
+            return
 
-        # Calculate Euclidean distance
-        distance = math.sqrt((gx - rx)**2 + (gy - ry)**2)
+        # assemble combined message (keeps original message types)
+        combined = GoalCurrentPose()
+        # assign copies (these are full ROS message objects)
+        combined.goal = self.goal_pose
+        combined.current_transform = transform
 
-        # Calculate angle to goal (global frame)
-        angle_to_goal = math.atan2(gy - ry, gx - rx)
+        # publish
+        self.pub.publish(combined)
 
-        # Get robot's current yaw
-        robot_yaw = self.quaternion_to_yaw(robot_pose.rotation)
+        # Calculate and log distance (throttled to avoid spam)
+        current_time = self.get_clock().now()
+        time_since_last_log = (current_time - self.last_distance_log_time).nanoseconds / 1e9
+        
+        if time_since_last_log >= self.distance_log_interval:
+            distance = self.calculate_distance(self.goal_pose, transform)
+            
+            goal_x = self.goal_pose.pose.position.x
+            goal_y = self.goal_pose.pose.position.y
+            current_x = transform.transform.translation.x
+            current_y = transform.transform.translation.y
+            
+            self.get_logger().info(
+                f"Distance to goal: {distance:.3f}m | "
+                f"Goal: ({goal_x:.2f}, {goal_y:.2f}) | "
+                f"Current: ({current_x:.2f}, {current_y:.2f})",
+                throttle_duration_sec=1.0
+            )
+            
+            self.last_distance_log_time = current_time
 
-        # Compute orientation difference (ensure it's between -π to π)
-        yaw_diff = math.atan2(math.sin(angle_to_goal - robot_yaw), 
-                             math.cos(angle_to_goal - robot_yaw))
+def main(args=None):
+    rclpy.init(args=args)
+    node = GoalCurrentPosePublisher()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
-        # Publish as [x_diff, y_diff, angle_diff] for more flexible use
-        goal_pos_diff = Float64MultiArray()
-        goal_pos_diff.data = [
-            gx - rx,  # x difference
-            gy - ry,  # y difference
-            yaw_diff  # angle difference
-        ]
-
-        self.goal_position_difference.publish(goal_pos_diff)
-
-    def quaternion_to_yaw(self, q):
-        """Convert quaternion to yaw angle in radians."""
-        return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 
-                         1.0 - 2.0 * (q.y**2 + q.z**2))
+if __name__ == '__main__':
+    main()

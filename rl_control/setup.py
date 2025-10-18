@@ -11,6 +11,8 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/mecanum_rl_control.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/mecanum_wheel_velocity.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/mecanum_distance_difference.launch.py']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -22,6 +24,8 @@ setup(
     entry_points={
         'console_scripts': [
             'rl_controller = rl_control.wheel_RL_controller:main',
+            'distance_calculator = rl_control.distance_difference_calculator:main',
+            'wheel_velocity = rl_control.wheel_velocity_translator:main',
         ],
     },
 )

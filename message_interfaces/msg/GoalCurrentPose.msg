@@ -1,0 +1,3 @@
+# msg/GoalCurrentPose.msg
+geometry_msgs/PoseStamped goal
+geometry_msgs/TransformStamped current_transform
