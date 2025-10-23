@@ -35,23 +35,27 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-install(DIRECTORY src/launch/ 
-  DESTINATION share/${PROJECT_NAME}/src/launch
+install(DIRECTORY launch/ 
+  DESTINATION share/${PROJECT_NAME}/launch
   )
 
-install(DIRECTORY src/description/urdf/
-  DESTINATION share/${PROJECT_NAME}/src/description/urdf
+install(DIRECTORY urdf/
+  DESTINATION share/${PROJECT_NAME}/urdf
   )
 
-install(DIRECTORY src/world/
-  DESTINATION share/${PROJECT_NAME}/src/world
+install(DIRECTORY meshes/
+  DESTINATION share/${PROJECT_NAME}/meshes
+  )
+
+install(DIRECTORY world/
+  DESTINATION share/${PROJECT_NAME}/world
   )  
 
-install(DIRECTORY src/config/
-  DESTINATION share/${PROJECT_NAME}/src/config
+install(DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/config
   )  
 
-install(DIRECTORY src/rviz/
-  DESTINATION share/${PROJECT_NAME}/src/rviz)
+install(DIRECTORY rviz/
+  DESTINATION share/${PROJECT_NAME}/rviz)
 
 ament_package()

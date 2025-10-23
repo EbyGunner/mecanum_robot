@@ -1,0 +1,145 @@
+<?xml version="1.0"?>
+<robot name="Mecanum_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Properties -->
+  <xacro:property name="M_PI" value="3.1415926535897931" />
+  
+  <!-- Robot dimensions -->
+  <xacro:property name="chassis_length" value="0.50" />
+  <xacro:property name="chassis_width" value="0.40" />
+  <xacro:property name="chassis_height" value="0.05" />
+  <xacro:property name="wheel_radius" value="0.029" />
+  <xacro:property name="wheel_length" value="0.039" />
+  
+  <!-- Wheel positions - each wheel has its own offsets -->
+  <xacro:property name="front_left_x" value="0.1175" />
+  <xacro:property name="front_left_y" value="0.113" />
+  
+  <xacro:property name="front_right_x" value="0.1175" />
+  <xacro:property name="front_right_y" value="-0.113" />
+  
+  <xacro:property name="back_left_x" value="-0.1175" />
+  <xacro:property name="back_left_y" value="0.113" />
+  
+  <xacro:property name="back_right_x" value="-0.1175" />
+  <xacro:property name="back_right_y" value="-0.113" />
+  
+  <xacro:property name="wheel_z_offset" value="-0.03" />
+  
+  <!-- Material definitions -->
+  <material name="blue">
+    <color rgba="0 0 1 1"/>
+  </material>
+  <material name="green">
+    <color rgba="0 1 0 1"/>
+  </material>
+  <material name="yellow">
+    <color rgba="1 1 0 0.5"/>
+  </material>
+
+  <!-- Includes -->
+  <xacro:include filename="gazebo_control.xacro" />
+  <xacro:include filename="gazeboCamera.xacro" />
+  <xacro:include filename="gazeboLidar.xacro" />
+  <xacro:include filename="gazeboIMU.xacro" />
+
+  <!-- Wheel Macro -->
+  <xacro:macro name="mecanum_wheel" params="name mesh_file joint_origin_rpy x_pos y_pos">
+    <link name="${name}_wheel_link">
+      <inertial>
+        <origin xyz="0 0 0.021031" rpy="0 0 0" />
+        <mass value="0.049871" />
+        <inertia ixx="5.3189E-06" ixy="0" ixz="0" iyy="5.3189E-06" iyz="0" izz="6.4396E-06" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="file://$(find mecanum_robot_simulation)/meshes/${mesh_file}"/>
+        </geometry>
+        <material name="green"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_length}"/>
+        </geometry>
+      </collision>
+    </link>
+    
+    <joint name="${name}_wheel_joint" type="continuous">
+      <origin xyz="${x_pos} ${y_pos} ${wheel_z_offset}" rpy="${joint_origin_rpy}" />
+      <parent link="base_link" />
+      <child link="${name}_wheel_link" />
+      <axis xyz="0 0 1" />
+      <limit effort="200" velocity="15" />
+    </joint>
+
+    <gazebo reference="${name}_wheel_link">
+      <mu1>1.0</mu1>
+      <mu2>1.0</mu2>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- Base Footprint -->
+  <link name="base_footprint">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.235 0.226 0.001"/>
+      </geometry>
+      <material name="yellow"/>
+    </visual>
+  </link>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="base_footprint"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Main Chassis -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="-8.294E-05 0 -0.023972" rpy="0 0 0" />
+      <mass value="6.5996" />
+      <inertia ixx="0.043356" ixy="0" ixz="0" iyy="0.13461" iyz="0" izz="0.17533" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="file://$(find mecanum_robot_simulation)/meshes/chasis.STL"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>  
+    <collision>
+      <origin xyz="0 0 -0.025" rpy="0 0 0" />
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}" />
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Create Wheels with proper positions -->
+  <xacro:mecanum_wheel name="front_left" mesh_file="front_left_wheel.STL" 
+                       joint_origin_rpy="${M_PI/2} 0 ${M_PI}"
+                       x_pos="${front_left_x}" y_pos="${front_left_y}"/>
+  
+  <xacro:mecanum_wheel name="front_right" mesh_file="front_right_wheel.STL" 
+                       joint_origin_rpy="${-M_PI/2} 0 ${M_PI}"
+                       x_pos="${front_right_x}" y_pos="${front_right_y}"/>
+  
+  <xacro:mecanum_wheel name="back_left" mesh_file="back_left_wheel.STL" 
+                       joint_origin_rpy="${M_PI/2} 0 ${M_PI}"
+                       x_pos="${back_left_x}" y_pos="${back_left_y}"/>
+  
+  <xacro:mecanum_wheel name="back_right" mesh_file="back_right_wheel.STL" 
+                       joint_origin_rpy="${-M_PI/2} 0 ${-M_PI}"
+                       x_pos="${back_right_x}" y_pos="${back_right_y}"/>
+
+  <!-- Gazebo Properties -->
+  <gazebo reference="base_link">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+  </gazebo>
+
+</robot>

@@ -103,12 +103,12 @@ class GoalCurrentPosePublisher(Node):
             current_x = transform.transform.translation.x
             current_y = transform.transform.translation.y
             
-            self.get_logger().info(
-                f"Distance to goal: {distance:.3f}m | "
-                f"Goal: ({goal_x:.2f}, {goal_y:.2f}) | "
-                f"Current: ({current_x:.2f}, {current_y:.2f})",
-                throttle_duration_sec=1.0
-            )
+            # self.get_logger().info(
+            #     f"Distance to goal: {distance:.3f}m | "
+            #     f"Goal: ({goal_x:.2f}, {goal_y:.2f}) | "
+            #     f"Current: ({current_x:.2f}, {current_y:.2f})",
+            #     throttle_duration_sec=1.0
+            # )
             
             self.last_distance_log_time = current_time
 

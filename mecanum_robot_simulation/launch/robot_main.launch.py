@@ -19,14 +19,14 @@ def generate_launch_description():
     )
 
     package_path = get_package_share_directory('mecanum_robot_simulation')
-    bridge_params = os.path.join(package_path, 'src', 'config', 'gazeebo_ros_bridge.yaml')
+    bridge_params = os.path.join(package_path, 'config', 'gazeebo_ros_bridge.yaml')
 
     rl_package = get_package_share_directory('rl_control')
 
     # Declare world argument
     arguments = DeclareLaunchArgument(
         'world',
-        default_value=os.path.join(package_path, 'src', 'world', 'mecanum_world'),
+        default_value=os.path.join(package_path, 'world', 'mecanum_world'),
         description='Gz sim World'
     )
 
@@ -51,7 +51,7 @@ def generate_launch_description():
     )
 
     # Load URDF model
-    xacro_file = os.path.join(package_path, 'src', 'description', 'urdf', 'urdf_final.urdf')
+    xacro_file = os.path.join(package_path, 'urdf', 'urdf_final.urdf')
     doc = xacro.process_file(xacro_file, mappings={'use_sim': 'true'})
     robot_desc = doc.toprettyxml(indent='  ')
 
@@ -92,7 +92,7 @@ def generate_launch_description():
         output='screen',
     )
 
-    rviz_config_file = os.path.join(package_path, 'src', 'rviz', 'robot_view.rviz')
+    rviz_config_file = os.path.join(package_path, 'rviz', 'robot_view.rviz')
 
     rviz_node = Node(
         package="rviz2",
@@ -104,7 +104,7 @@ def generate_launch_description():
 
     # SLAM node
     slam_node = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'online_async_launch.py'))
+        PythonLaunchDescriptionSource(os.path.join(package_path, 'launch', 'online_async_launch.py'))
     )
 
     # Define RL support nodes
@@ -118,7 +118,7 @@ def generate_launch_description():
 
     # Select navigation or RL based on the argument
     navigation_node = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(package_path, 'src', 'launch', 'navigation_launch.py')),
+        PythonLaunchDescriptionSource(os.path.join(package_path, 'launch', 'navigation_launch.py')),
         launch_arguments={'slam': LaunchConfiguration('slam')}.items()
     )
 

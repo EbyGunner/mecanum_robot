@@ -13,7 +13,7 @@
 
   <joint name="lidar_joint" type="fixed">
       <origin xyz="0 0 0.01" rpy="0 0 0" />
-      <parent link="chasis" />
+      <parent link="base_link" />
       <child link="lidar_frame" />
   </joint>
 
