@@ -64,6 +64,11 @@ class MecanumRLController(Node, gym.Env):
         self.done = False
         self.success_threshold = 0.05
 
+        # NEW: Track if we've already saved model for current goal
+        self.model_saved_for_current_goal = False
+        self.waiting_for_new_goal = False
+        self.new_goal_received = False  # NEW: Flag to indicate new goal received
+
         # Progress monitoring - optimized
         self.position_buffer = np.zeros((10, 2))
         self.buffer_index = 0
@@ -87,10 +92,14 @@ class MecanumRLController(Node, gym.Env):
         self.collision_threshold = 0.35
         self.last_recovery_type = "none"
         
-        # FIXED: Proper collision detection zones using tuple of slices
+        # FIXED: 360-degree collision detection zones
         self.collision_zones = {
-            'front': (slice(0, 45), slice(-45, None)),  # Front 90 degrees
-            'front_sides': (slice(45, 90), slice(-90, -45)),
+            'front': list(range(0, 45)) + list(range(315, 360)),      # Front 90 degrees
+            'right': list(range(45, 135)),                            # Right 90 degrees  
+            'back': list(range(135, 225)),                            # Back 90 degrees
+            'left': list(range(225, 315)),                            # Left 90 degrees
+            'front_right': list(range(0, 90)),                        # Front-right 90 degrees
+            'front_left': list(range(270, 360)),                      # Front-left 90 degrees
         }
         
         # State tracking
@@ -99,15 +108,22 @@ class MecanumRLController(Node, gym.Env):
         self.oscillation_counter = 0
         self.max_oscillations = 3
         
+        # NEW: Stuck detection and anti-oscillation
+        self.stuck_counter = 0
+        self.max_stuck_steps = 30
+        self.oscillation_threshold = 0.1  # Minimum position change to not be considered stuck
+        self.consecutive_negative_progress = 0
+        self.max_negative_progress = 5
+        
         # Pre-computed constants
         self.control_period = 0.1
         
         # Model saving parameters
         self.successful_episodes = 0
         self.models_saved = 0
-        self.max_models_to_save = 20  # Increased limit for date-time folders
+        self.max_models_to_save = 20
         self.last_success_time = 0
-        self.success_cooldown = 5  # Minimum seconds between model saves
+        self.success_cooldown = 5
         
         # Training session management
         self.current_session_dir = None
@@ -145,7 +161,7 @@ class MecanumRLController(Node, gym.Env):
             max_grad_norm=0.8,
             ent_coef=0.01,
             target_kl=0.03,
-            tensorboard_log=None  # Will be set in train method
+            tensorboard_log=None
         )
     
     def _create_session_directory(self):
@@ -153,10 +169,7 @@ class MecanumRLController(Node, gym.Env):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         session_dir = os.path.join(SRC_DIR, 'mecanum_robot', 'rl_control', 'train', timestamp)
         
-        # Create main session directory
         os.makedirs(session_dir, exist_ok=True)
-        
-        # Create subdirectories
         success_models_dir = os.path.join(session_dir, 'success_models')
         model_dir = os.path.join(session_dir, 'model')
         logs_dir = os.path.join(session_dir, 'logs')
@@ -169,28 +182,32 @@ class MecanumRLController(Node, gym.Env):
         self.session_start_time = datetime.now()
         
         self.get_logger().info(f"📁 Created new training session: {timestamp}")
-        self.get_logger().info(f"📁 Session directory: {session_dir}")
         
         return session_dir
     
     def _get_session_path(self, subpath=""):
         """Get path within current session directory"""
         if self.current_session_dir is None:
-            # If no session directory exists, create one
             self._create_session_directory()
         return os.path.join(self.current_session_dir, subpath)
     
     def goal_cpos_callback(self, msg):
-        """Optimized goal and pose update"""
+        """MODIFIED: Immediately reset episode when new goal is received"""
         new_goal_x = msg.goal.pose.position.x
         new_goal_y = msg.goal.pose.position.y
         
+        # Check if this is a new goal
+        is_new_goal = False
         if (self.goal_position is None or 
             np.linalg.norm(np.array([new_goal_x, new_goal_y]) - self.goal_position) > 0.3):
             
             self.goal_position = np.array([new_goal_x, new_goal_y])
-            self.get_logger().info(f"New goal: ({self.goal_position[0]:.2f}, {self.goal_position[1]:.2f})",
-                                 throttle_duration_sec=2.0)
+            is_new_goal = True
+            
+            # NEW: Set flag to reset episode immediately
+            self.new_goal_received = True
+            
+            self.get_logger().info(f"🎯 NEW GOAL RECEIVED: ({self.goal_position[0]:.2f}, {self.goal_position[1]:.2f}) - Resetting episode")
 
         # Update current pose
         self.current_position[0] = msg.current_transform.transform.translation.x
@@ -238,17 +255,24 @@ class MecanumRLController(Node, gym.Env):
         }
     
     def compute_reward(self) -> float:
-        """Optimized and more stable reward function"""
+        """ENHANCED: More stable reward function with anti-oscillation penalties"""
         distance_to_goal = np.linalg.norm(self.current_position - self.goal_position)
         
         # Base distance reward
-        distance_reward = -distance_to_goal * 0.5
+        # distance_reward = -distance_to_goal * 0.5
         
         # Progress reward
         progress_reward = 0.0
         if self.previous_distance is not None:
             progress = self.previous_distance - distance_to_goal
-            progress_reward = 2.0 * progress
+            progress_reward = 5.0 * progress
+            
+            # NEW: Penalize negative progress (moving away from goal)
+            if progress < -0.01:  # If moving away significantly
+                self.consecutive_negative_progress += 1
+                progress_reward -= 1.0 * abs(progress)
+            else:
+                self.consecutive_negative_progress = max(0, self.consecutive_negative_progress - 1)
         
         # Goal achievement bonus
         success_bonus = 50.0 if distance_to_goal < self.success_threshold else 0.0
@@ -262,10 +286,8 @@ class MecanumRLController(Node, gym.Env):
         
         orientation_reward = -0.3 * angle_error
         
-        # Obstacle penalty - FIXED: Use proper front detection
-        front_indices = list(range(0, 45)) + list(range(315, 360))
-        min_lidar = np.min(self.lidar_data[front_indices])
-        obstacle_penalty = -8.0 * max(0, 0.5 - min_lidar) if min_lidar < 0.5 else 0.0
+        # ENHANCED: 360-degree obstacle penalty
+        obstacle_penalty = self._compute_360_obstacle_penalty()
         
         # Movement bonus
         movement_bonus = 0.0
@@ -274,13 +296,20 @@ class MecanumRLController(Node, gym.Env):
                                     self.position_buffer[self.buffer_index-2])
             movement_bonus = 0.1 * movement if progress_reward > 0 else 0.0
         
+        # NEW: Penalty for being stuck/oscillating
+        stuck_penalty = 0.0
+        if self._is_oscillating():
+            stuck_penalty = -2.0
+            self.get_logger().warn("Oscillation penalty applied", throttle_duration_sec=1.0)
+        
         total_reward = (
-            distance_reward +
+            # distance_reward +
             progress_reward +
             success_bonus +
-            orientation_reward +
+            # orientation_reward +
             obstacle_penalty +
-            movement_bonus
+            # movement_bonus +
+            stuck_penalty
         )
         
         # Update previous distance
@@ -288,20 +317,68 @@ class MecanumRLController(Node, gym.Env):
         
         return float(total_reward)
     
+    def _compute_360_obstacle_penalty(self) -> float:
+        """Compute obstacle penalty for 360-degree detection"""
+        penalty = 0.0
+        
+        # Check each collision zone
+        for zone_name, indices in self.collision_zones.items():
+            min_distance = np.min(self.lidar_data[indices])
+            
+            # Apply penalties based on distance and zone importance
+            if min_distance < 0.3:
+                # High penalty for very close obstacles
+                if zone_name == 'front':
+                    penalty -= 10.0 * (0.3 - min_distance)
+                else:
+                    penalty -= 5.0 * (0.3 - min_distance)
+            elif min_distance < 0.5:
+                # Medium penalty for close obstacles
+                if zone_name == 'front':
+                    penalty -= 5.0 * (0.5 - min_distance)
+                else:
+                    penalty -= 2.0 * (0.5 - min_distance)
+            elif min_distance < 1.0:
+                # Low penalty for nearby obstacles
+                if zone_name == 'front':
+                    penalty -= 1.0 * (1.0 - min_distance)
+        
+        return penalty
+    
+    def _is_oscillating(self) -> bool:
+        """Enhanced oscillation detection"""
+        if self.buffer_index < 5:
+            return False
+        
+        # Check position oscillation
+        recent_positions = self.position_buffer[:self.buffer_index]
+        if len(recent_positions) >= 5:
+            position_variance = np.var(recent_positions, axis=0).mean()
+            if position_variance < 0.01:  # Very little movement
+                return True
+        
+        # Check action oscillation
+        action_variance = np.var(self.last_actions, axis=0).mean()
+        if action_variance > 0.9:  # High variance in actions
+            return True
+            
+        # Check consecutive negative progress
+        if self.consecutive_negative_progress >= self.max_negative_progress:
+            return True
+            
+        return False
+    
     def _save_success_model(self, distance_to_goal: float):
-        """Save model after successful episode with timestamp and performance metrics"""
+        """Save model after successful episode - MODIFIED to save only once per goal"""
         current_time = time.time()
         
-        # Check cooldown and model limit
         if (current_time - self.last_success_time < self.success_cooldown or 
-            self.models_saved >= self.max_models_to_save):
+            self.models_saved >= self.max_models_to_save or
+            self.model_saved_for_current_goal):  # NEW: Don't save if already saved for this goal
             return
         
         try:
-            # Get success models directory within current session
             success_dir = self._get_session_path("success_models")
-            
-            # Generate filename with timestamp and performance metrics
             timestamp = datetime.now().strftime("%H%M%S")
             filename = f"success_model_{timestamp}_ep{self.successful_episodes}_reward{self.episode_reward:.1f}_steps{self.current_step}"
             
@@ -310,20 +387,28 @@ class MecanumRLController(Node, gym.Env):
             
             self.models_saved += 1
             self.last_success_time = current_time
+            self.model_saved_for_current_goal = True  # NEW: Mark as saved for current goal
             
             self.get_logger().info(
                 f"🎯 SUCCESS! Model saved: {filename} | "
                 f"Distance: {distance_to_goal:.3f}m | "
                 f"Reward: {self.episode_reward:.1f} | "
-                f"Steps: {self.current_step} | "
-                f"Session: {os.path.basename(self.current_session_dir)}"
+                f"Steps: {self.current_step}"
             )
             
         except Exception as e:
             self.get_logger().error(f"Failed to save success model: {e}")
     
     def step(self, action: np.ndarray):
-        """Optimized step function with efficient recovery system"""
+        """ENHANCED step function with better anti-oscillation"""
+        # NEW: Check if new goal was received during step execution
+        if self.new_goal_received:
+            self.get_logger().info("🔄 New goal received during step execution - resetting episode")
+            self._reset_episode()
+            # Return current observation with zero reward for the interrupted step
+            obs = self.get_obs()
+            return obs, 0.0, True, {"status": "episode_interrupted_by_new_goal"}
+        
         # Update position buffer
         self.position_buffer[self.buffer_index] = self.current_position.copy()
         self.buffer_index = (self.buffer_index + 1) % len(self.position_buffer)
@@ -332,12 +417,13 @@ class MecanumRLController(Node, gym.Env):
         self.last_actions[self.action_index] = action.copy()
         self.action_index = (self.action_index + 1) % len(self.last_actions)
         
-        # Check for oscillation
-        if self._detect_oscillation():
+        # ENHANCED: Check for oscillation and apply correction
+        if self._is_oscillating():
             self.oscillation_counter += 1
             if self.oscillation_counter >= self.max_oscillations:
                 action = self._generate_escape_pattern()
                 self.oscillation_counter = 0
+                self.stuck_counter = 0
                 self.get_logger().warn("Oscillation detected - applying escape pattern", 
                                      throttle_duration_sec=2.0)
         else:
@@ -350,11 +436,18 @@ class MecanumRLController(Node, gym.Env):
             action = action * (1 - blend_factor) + recovery_action * blend_factor
             self.last_recovery_type = recovery_type
         
+        # NEW: Progressive speed boost when stuck
+        if self.oscillation_counter > 0:
+            speed_boost = min(1.5, 1.0 + 0.1 * self.oscillation_counter)
+            boosted_speed = self.current_max_speed * speed_boost
+        else:
+            boosted_speed = self.current_max_speed
+        
         # Adaptive speed control
         self._update_speed_control()
         
-        # Apply action scaling and publish
-        real_action = np.tanh(action) * self.current_max_speed
+        # Apply action with potential boost
+        real_action = np.tanh(action) * boosted_speed
         
         vel_msg = Float64MultiArray()
         vel_msg.data = real_action.tolist()
@@ -373,35 +466,29 @@ class MecanumRLController(Node, gym.Env):
             "distance_to_goal": obs["goal_distance"][0],
             "episode_reward": self.episode_reward,
             "recovery_active": recovery_type != "none",
-            "steps": self.current_step
+            "steps": self.current_step,
+            "oscillating": self._is_oscillating()
         }
 
         self.get_logger().info(
             f"Step {self.current_step}: Distance={obs['goal_distance'][0]:.3f} | "
             f"Reward={self.episode_reward:.1f} | "
-            f"Recovery={recovery_type != 'none'}",
+            f"Recovery={recovery_type != 'none'} | "
+            f"Oscillating={self._is_oscillating()}",
             throttle_duration_sec=0.5
         )
         
         return obs, reward, self.done, info
     
-    def _detect_oscillation(self) -> bool:
-        """Efficient oscillation detection"""
-        if np.all(self.last_actions == 0):
-            return False
-        
-        action_variance = np.var(self.last_actions, axis=0).mean()
-        return action_variance > 0.8
-    
     def _check_recovery_need(self, current_action):
-        """Unified recovery need detection"""
+        """ENHANCED recovery need detection with 360-degree collision detection"""
         recovery_action = np.zeros(4)
         recovery_type = "none"
         
-        # Check for collisions first
-        collision_info = self._check_collision()
+        # Check for collisions in all directions
+        collision_info = self._check_360_collision()
         if collision_info:
-            recovery_action = self._get_collision_recovery(collision_info)
+            recovery_action = self._get_360_collision_recovery(collision_info)
             recovery_type = "collision"
             self.recovery_cooldown = 10
             return recovery_action, recovery_type
@@ -416,7 +503,7 @@ class MecanumRLController(Node, gym.Env):
             self.recovery_duration = min(self.recovery_duration + 1, self.max_recovery_steps)
             return recovery_action, recovery_type
         
-        # Check if stuck
+        # Check if stuck (enhanced)
         if (self.recovery_cooldown <= 0 and 
             self._is_stuck() and 
             self.current_step > 20):
@@ -436,14 +523,60 @@ class MecanumRLController(Node, gym.Env):
         
         return recovery_action, recovery_type
     
-    def _check_collision(self):
-        """Efficient collision detection"""
-        # FIXED: Use proper front indices instead of slices
-        front_indices = list(range(0, 45)) + list(range(315, 360))
-        front_dist = np.min(self.lidar_data[front_indices])
-        if front_dist < self.collision_threshold:
-            return {'distance': front_dist, 'zone': 'front'}
-        return None
+    def _check_360_collision(self):
+        """360-degree collision detection"""
+        collision_zones = {}
+        
+        for zone_name, indices in self.collision_zones.items():
+            min_distance = np.min(self.lidar_data[indices])
+            if min_distance < self.collision_threshold:
+                collision_zones[zone_name] = min_distance
+        
+        return collision_zones if collision_zones else None
+    
+    def _get_360_collision_recovery(self, collision_info):
+        """Recovery actions based on collision direction"""
+        if not collision_info:
+            return np.zeros(4)
+        
+        # Get the most critical collision (closest obstacle)
+        worst_zone = min(collision_info, key=collision_info.get)
+        distance = collision_info[worst_zone]
+        
+        recovery_strategy = {
+            'front': self._recover_from_front_collision,
+            'front_right': self._recover_from_front_right_collision,
+            'front_left': self._recover_from_front_left_collision,
+            'right': self._recover_from_side_collision,
+            'left': self._recover_from_side_collision,
+            'back': self._recover_from_back_collision
+        }
+        
+        recovery_func = recovery_strategy.get(worst_zone, self._recover_from_front_collision)
+        return recovery_func(distance)
+    
+    def _recover_from_front_collision(self, distance):
+        """Recovery from front collision"""
+        if distance < 0.2:
+            return np.array([-0.8, -0.8, -0.8, -0.8])  # Strong backup
+        else:
+            return np.array([-0.4, 0.4, -0.4, 0.4])   # Backup with turn
+    
+    def _recover_from_front_right_collision(self, distance):
+        """Recovery from front-right collision"""
+        return np.array([-0.3, -0.6, -0.3, -0.6])  # Backup left
+    
+    def _recover_from_front_left_collision(self, distance):
+        """Recovery from front-left collision"""
+        return np.array([-0.6, -0.3, -0.6, -0.3])  # Backup right
+    
+    def _recover_from_side_collision(self, distance):
+        """Recovery from side collision"""
+        return np.array([0.3, -0.3, 0.3, -0.3])  # Strafe away
+    
+    def _recover_from_back_collision(self, distance):
+        """Recovery from back collision"""
+        return np.array([0.4, 0.4, 0.4, 0.4])  # Move forward
     
     def _is_off_course(self) -> bool:
         """Check if robot is significantly off course"""
@@ -451,24 +584,27 @@ class MecanumRLController(Node, gym.Env):
         return abs(goal_angle) > self.off_course_threshold
     
     def _is_stuck(self) -> bool:
-        """Efficient stuck detection using position buffer"""
-        if self.buffer_index < 2:
+        """Enhanced stuck detection"""
+        if self.buffer_index < 3:
             return False
         
+        # Check if position hasn't changed much
         total_movement = 0.0
+        valid_comparisons = 0
+        
         for i in range(1, min(5, self.buffer_index)):
             idx1 = (self.buffer_index - i) % len(self.position_buffer)
             idx2 = (self.buffer_index - i - 1) % len(self.position_buffer)
-            total_movement += np.linalg.norm(self.position_buffer[idx1] - self.position_buffer[idx2])
+            movement = np.linalg.norm(self.position_buffer[idx1] - self.position_buffer[idx2])
+            if movement > 0:  # Only count valid movements
+                total_movement += movement
+                valid_comparisons += 1
         
-        return total_movement < self.min_position_change * 3
-    
-    def _get_collision_recovery(self, collision_info):
-        """Simple collision recovery: backup and turn"""
-        if collision_info['distance'] < 0.2:
-            return np.array([-0.8, -0.8, -0.8, -0.8])
-        else:
-            return np.array([-0.3, 0.3, -0.3, 0.3])
+        if valid_comparisons == 0:
+            return True
+            
+        avg_movement = total_movement / valid_comparisons
+        return avg_movement < self.min_position_change
     
     def _get_course_correction(self):
         """Efficient course correction"""
@@ -485,14 +621,18 @@ class MecanumRLController(Node, gym.Env):
         ])
     
     def _get_stuck_recovery(self):
-        """Simple stuck recovery pattern"""
-        pattern = (self.current_step // 5) % 3
-        if pattern == 0:
-            return np.array([0.4, -0.4, 0.4, -0.4])
-        elif pattern == 1:
-            return np.array([-0.4, 0.4, -0.4, 0.4])
-        else:
-            return np.array([-0.3, 0.3, -0.3, 0.3])
+        """Enhanced stuck recovery with more varied patterns"""
+        # Use episode step to create a predictable but varied pattern
+        pattern_type = (self.current_step // 10) % 4
+        
+        patterns = {
+            0: np.array([0.5, -0.5, 0.5, -0.5]),   # Strafe right
+            1: np.array([-0.5, 0.5, -0.5, 0.5]),   # Strafe left
+            2: np.array([0.3, 0.3, -0.3, -0.3]),   # Turn in place
+            3: np.array([-0.4, -0.4, -0.4, -0.4])  # Backup
+        }
+        
+        return patterns[pattern_type]
     
     def _get_recovery_blend_factor(self, recovery_type):
         """Get blending factor for recovery actions"""
@@ -519,7 +659,7 @@ class MecanumRLController(Node, gym.Env):
             self.current_max_speed *= 0.7
     
     def _check_termination(self, obs) -> bool:
-        """Efficient termination condition checking"""
+        """Efficient termination condition checking - MODIFIED for goal success behavior"""
         distance_to_goal = obs["goal_distance"][0]
         
         # Check for success first
@@ -530,32 +670,43 @@ class MecanumRLController(Node, gym.Env):
                                  f"Reward: {self.episode_reward:.1f} | "
                                  f"Steps: {self.current_step}")
             
-            # Save model on success
+            # Save model on success (only once per goal)
             self._save_success_model(distance_to_goal)
+            
             return True
         
         if self.current_step >= self.episode_length:
             self.get_logger().info(f"Episode length exceeded. Final distance: {distance_to_goal:.2f}m")
             return True
         
-        if self.recovery_duration > self.max_recovery_steps * 2:
-            self.get_logger().warn("Terminating due to prolonged recovery")
+        # Enhanced: Terminate if stuck for too long
+        if self._is_oscillating() and self.oscillation_counter > self.max_oscillations * 2:
+            self.get_logger().warn("Terminating due to prolonged oscillation")
             return True
         
         return False
     
     def _generate_escape_pattern(self):
-        """Generate escape pattern for oscillation"""
-        return np.random.uniform(-0.5, 0.5, 4)
+        """Generate more effective escape pattern for oscillation"""
+        # More aggressive and varied escape patterns
+        patterns = [
+            np.array([0.8, -0.8, 0.8, -0.8]),   # Strong strafe right
+            np.array([-0.8, 0.8, -0.8, 0.8]),   # Strong strafe left  
+            np.array([0.6, 0.6, -0.6, -0.6]),   # Strong turn
+            np.array([-0.7, -0.7, -0.7, -0.7]), # Strong backup
+            np.array([0.5, 0.3, 0.5, 0.3]),     # Curve right
+            np.array([0.3, 0.5, 0.3, 0.5]),     # Curve left
+        ]
+        
+        return patterns[self.current_step % len(patterns)]
     
-    def reset(self, seed=None, options=None):
-        """Optimized reset function"""
-        if seed is not None:
-            np.random.seed(seed)
-            
+    def _reset_episode(self):
+        """NEW: Internal method to reset episode state"""
         self.current_step = 0
         self.episode_reward = 0
         self.done = False
+        self.model_saved_for_current_goal = False  # Reset for new goal
+        self.new_goal_received = False  # Clear the flag
         
         self.position_buffer.fill(0)
         self.last_actions.fill(0)
@@ -568,16 +719,35 @@ class MecanumRLController(Node, gym.Env):
         self.recovery_cooldown = 0
         self.last_recovery_type = "none"
         self.oscillation_counter = 0
+        self.stuck_counter = 0
+        self.consecutive_negative_progress = 0
         
+        # Stop the robot
+        vel_msg = Float64MultiArray()
+        vel_msg.data = [0.0, 0.0, 0.0, 0.0]
+        self.wheel_vel_pub.publish(vel_msg)
+    
+    def reset(self, seed=None, options=None):
+        """Enhanced reset function - MODIFIED to use internal reset method"""
+        if seed is not None:
+            np.random.seed(seed)
+            
+        self._reset_episode()
         return self.get_obs(), {}
     
     def control_loop(self):
-        """Optimized control loop"""
+        """MODIFIED: Control loop that immediately resets on new goal"""
         if self.goal_position is None:
             self.get_logger().warn("Waiting for first goal position...", 
                                  throttle_duration_sec=3.0)
             return
-    
+        
+        # NEW: Check if new goal was received and reset immediately
+        if self.new_goal_received:
+            self.get_logger().info("🔄 New goal received - immediately resetting current episode")
+            self._reset_episode()
+            self.get_logger().info("🔄 Episode reset complete - starting fresh episode")
+        
         if not self.done:
             try:
                 obs = self.get_obs()
@@ -586,9 +756,9 @@ class MecanumRLController(Node, gym.Env):
             except Exception as e:
                 self.get_logger().error(f"Error in control loop: {e}")
         else:
+            # This handles normal episode terminations (success, timeout, oscillation)
             final_distance = np.linalg.norm(self.current_position - self.goal_position)
             
-            # Log episode summary
             if final_distance < self.success_threshold:
                 self.get_logger().info(
                     f"🎯 SUCCESSFUL EPISODE: Steps={self.current_step}, "
@@ -600,8 +770,9 @@ class MecanumRLController(Node, gym.Env):
                     f"Reward={self.episode_reward:.2f}, Distance={final_distance:.2f}m"
                 )
             
+            # Reset for next episode
             self.reset()
-    
+
     def train(self, total_timesteps: int = 50000):
         """Optimized training with better logging and model saving"""
         self.get_logger().info("Starting optimized training...")
@@ -716,13 +887,22 @@ class MecanumRLController(Node, gym.Env):
 def main(args=None):
     rclpy.init(args=args)
     node = MecanumRLController()
+    
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        # Check if ROS 2 is still valid before logging
+        if rclpy.ok():
+            node.get_logger().info("Keyboard interrupt received, shutting down RL controller...")
+    except Exception as e:
+        if rclpy.ok():
+            node.get_logger().error(f"Error during execution: {e}")
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        # Clean shutdown - don't call rclpy.shutdown() as launch handles it
+        try:
+            node.destroy_node()
+        except:
+            pass
 
 if __name__ == '__main__':
     main()

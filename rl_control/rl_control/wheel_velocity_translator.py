@@ -1,8 +1,9 @@
+#!/usr/bin/env python3
+import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64MultiArray
 import numpy as np
-import rclpy
 
 class MecanumWheelController(Node):
     def __init__(self):
@@ -82,13 +83,20 @@ class MecanumWheelController(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = MecanumWheelController()
+    
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info("Keyboard interrupt received, shutting down mecanum wheel controller...")
+    except Exception as e:
+        node.get_logger().error(f"Error in mecanum wheel controller: {e}")
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        # Clean shutdown - don't call rclpy.shutdown() as launch handles it
+        try:
+            node.destroy_node()
+        except:
+            pass
+        # Don't call rclpy.shutdown() - let launch handle it
 
 if __name__ == '__main__':
     main()

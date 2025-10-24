@@ -115,13 +115,20 @@ class GoalCurrentPosePublisher(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = GoalCurrentPosePublisher()
+    
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info("Keyboard interrupt received, shutting down goal pose publisher...")
+    except Exception as e:
+        node.get_logger().error(f"Error in goal pose publisher: {e}")
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        # Clean shutdown - don't call rclpy.shutdown() as launch handles it
+        try:
+            node.destroy_node()
+        except:
+            pass
+        # Don't call rclpy.shutdown() - let launch handle it
 
 if __name__ == '__main__':
     main()
